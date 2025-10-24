@@ -16,9 +16,7 @@
       "pl.mikof.lootapi.LootAPI"
     ]
   },
-  "mixins": [
-    "lootapi.mixins.json"
-  ],
+
   "depends": {
     "fabricloader": ">=0.14.21",
     "fabric-api": "*",
