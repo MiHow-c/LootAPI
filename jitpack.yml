@@ -1,0 +1,16 @@
+# JitPack build configuration for Loot API
+# https://jitpack.io/docs/BUILDING/
+
+jdk:
+  - openjdk17
+
+before_install:
+  - echo "Setting up Java 17 for Minecraft 1.20.1"
+
+install:
+  - echo "Building Loot API..."
+  - ./gradlew clean build publishToMavenLocal --no-daemon --stacktrace -x test
+
+# Opcjonalne: Własne repo z artifacts
+# env:
+#   GRADLE_OPTS: "-Xmx2g -XX:MaxPermSize=512m"

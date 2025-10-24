@@ -1,0 +1,46 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# VSCode
+.vscode/
+
+# Minecraft
+run/
+logs/
+crash-reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Fabric specific
+remappedSrc/
+.fabric/
+
+# Maven
+target/
+
+# Temp files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# JitPack (opcjonalne - JitPack i tak używa swojego cache)
+# .m2/
