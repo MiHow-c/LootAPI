@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "lootapi",
+  "version": "${version}",
+  "name": "Loot API",
+  "description": "Comprehensive API for managing Minecraft loot tables with ease",
+  "authors": ["Mikof"],
+  "contact": {
+    "homepage": "https://github.com/mikof/lootapi"
+  },
+  "license": "MIT",
+  "icon": "assets/lootapi/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "pl.mikof.lootapi.LootAPI"
+    ]
+  },
+  "mixins": [
+    "lootapi.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "fabric-api": "*",
+    "minecraft": "1.20.1",
+    "java": ">=17"
+  },
+  "suggests": {
+    "another-mod": "*"
+  }
+}
