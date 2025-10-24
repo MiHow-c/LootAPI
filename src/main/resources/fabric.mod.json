@@ -16,7 +16,6 @@
       "pl.mikof.lootapi.LootAPI"
     ]
   },
-
   "depends": {
     "fabricloader": ">=0.14.21",
     "fabric-api": "*",
