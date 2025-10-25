@@ -8,12 +8,12 @@ Ten przykład pokazuje jak używać Loot API w swoim modzie.
 
 ```groovy
 repositories {
-    mavenLocal()  // Lub inne repo (zobacz PUBLISHING.md)
+    mavenLocal()
+    maven { url 'https://jitpack.io/' }
 }
 
 dependencies {
     modImplementation "pl.mikof:lootapi:1.0.0"
-    include "pl.mikof:lootapi:1.0.0"  // Ważne!
 }
 ```
 
