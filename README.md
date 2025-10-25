@@ -425,4 +425,4 @@ Jeśli napotkasz problemy:
 
 ---
 
-**Stworzone z ❤️ przez Mikof dla społeczności Fabric!**
+
