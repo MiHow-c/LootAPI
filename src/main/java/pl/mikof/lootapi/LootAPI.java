@@ -29,7 +29,7 @@ public class LootAPI implements ModInitializer {
             initializeComponents();
             
             // Teraz można bezpiecznie ładować przykłady
-            loadExamples();
+            //loadExamples();
             
             LootLogger.logInitComplete();
             
@@ -64,17 +64,17 @@ public class LootAPI implements ModInitializer {
      * Ładuje przykładowe modyfikacje
      * Wywoływane PO inicjalizacji API
      */
-    private void loadExamples() {
-        LootLogger.logInfo("Loading example modifications...");
+    //private void loadExamples() {
+        //LootLogger.logInfo("Loading example modifications...");
         
         // Zakomentuj/odkomentuj linie poniżej aby włączyć/wyłączyć przykłady
-        try {
-            pl.mikof.lootapi.examples.LootAPIExamples.registerExamples();
-            LootLogger.logSuccess("Examples loaded successfully");
-        } catch (Exception e) {
-            LootLogger.logWarning("Failed to load examples: " + e.getMessage());
-        }
-    }
+        //try {
+            //pl.mikof.lootapi.examples.LootAPIExamples.registerExamples();
+            //LootLogger.logSuccess("Examples loaded successfully");
+        //} catch (Exception e) {
+            //LootLogger.logWarning("Failed to load examples: " + e.getMessage());
+        //}
+    //}
     
     /**
      * Sprawdza czy API zostało zainicjalizowane

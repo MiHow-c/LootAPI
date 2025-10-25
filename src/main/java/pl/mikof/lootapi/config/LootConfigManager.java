@@ -28,7 +28,6 @@ public class LootConfigManager {
             
             if (!Files.exists(configPath)) {
                 LOGGER.warn("Config file not found: {}", configPath);
-                createDefaultConfig(configPath);
                 return;
             }
             
@@ -148,70 +147,29 @@ public class LootConfigManager {
             LOGGER.error("Failed to save config: {}", filename, e);
         }
     }
-    
-    private static void createDefaultConfig(Path configPath) {
-        try {
-            Files.createDirectories(configPath.getParent());
-            
-            JsonObject root = new JsonObject();
-            JsonArray modifications = new JsonArray();
-            
-            JsonObject exampleMod = new JsonObject();
-            exampleMod.addProperty("table", "minecraft:blocks/coal_ore");
-            exampleMod.addProperty("item", "minecraft:diamond");
-            exampleMod.addProperty("weight", 5);
-            modifications.add(exampleMod);
-            
-            JsonObject exampleMod2 = new JsonObject();
-            exampleMod2.addProperty("table", "minecraft:entities/zombie");
-            exampleMod2.addProperty("item", "minecraft:gold_ingot");
-            exampleMod2.addProperty("weight", 10);
-            JsonObject count = new JsonObject();
-            count.addProperty("min", 2);
-            count.addProperty("max", 5);
-            exampleMod2.add("count", count);
-            modifications.add(exampleMod2);
-            root.add("modifications", modifications);
-            
-            JsonArray removals = new JsonArray();
-            JsonObject exampleRemoval = new JsonObject();
-            exampleRemoval.addProperty("table", "minecraft:blocks/diamond_ore");
-            exampleRemoval.addProperty("item", "minecraft:diamond");
-            removals.add(exampleRemoval);
-            root.add("removals", removals);
-            
-            JsonArray replacements = new JsonArray();
-            JsonObject exampleReplacement = new JsonObject();
-            exampleReplacement.addProperty("table", "minecraft:entities/creeper");
-            exampleReplacement.addProperty("old_item", "minecraft:gunpowder");
-            exampleReplacement.addProperty("new_item", "minecraft:tnt");
-            replacements.add(exampleReplacement);
-            root.add("replacements", replacements);
-            
-            JsonObject multipliers = new JsonObject();
-            multipliers.addProperty("minecraft:entities/zombie", 2.0);
-            multipliers.addProperty("minecraft:blocks/iron_ore", 1.5);
-            root.add("multipliers", multipliers);
-            
-            String json = GSON.toJson(root);
-            Files.writeString(configPath, json);
-            LOGGER.info("Created default config at: {}", configPath);
-        } catch (Exception e) {
-            LOGGER.error("Failed to create default config", e);
-        }
-    }
+
     
     public static void loadAllConfigs() {
         try {
             Path configDir = Paths.get(CONFIG_DIR);
             if (!Files.exists(configDir)) {
                 Files.createDirectories(configDir);
-                createDefaultConfig(configDir.resolve("default.json"));
+                LOGGER.info("Config directory created at: {}", configDir);
+                LOGGER.info("No configuration files found. Loot API will not modify any loot tables.");
                 return;
             }
-            Files.list(configDir)
+            
+            long configCount = Files.list(configDir)
                 .filter(path -> path.toString().endsWith(".json"))
-                .forEach(path -> loadConfig(path.getFileName().toString()));
+                .peek(path -> loadConfig(path.getFileName().toString()))
+                .count();
+                
+            if (configCount == 0) {
+                LOGGER.info("No active configuration files found. Loot API is running in passive mode.");
+                LOGGER.info("Create .json files in config/lootapi/ to configure loot table modifications.");
+            } else {
+                LOGGER.info("Loaded {} configuration file(s)", configCount);
+            }
         } catch (Exception e) {
             LOGGER.error("Failed to load configs", e);
         }
