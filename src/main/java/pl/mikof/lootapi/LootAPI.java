@@ -1,58 +1,69 @@
 package pl.mikof.lootapi;
 
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.LootTableLoadEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pl.mikof.lootapi.config.LootConfigManager;
-import pl.mikof.lootapi.glm.GLMRegistry;
+import pl.mikof.lootapi.system.LootModificationSystem;
 
 /**
- * Main NeoForge mod class for Loot API
- * Features Global Loot Modifiers for complete loot table control
+ * LootAPI - Kompletny system modyfikacji loot tables dla NeoForge
+ * Wersja 2.0 - W pełni funkcjonalna
  */
 @Mod(LootAPI.MOD_ID)
 public class LootAPI {
     public static final String MOD_ID = "lootapi";
-    public static final String MOD_NAME = "Loot API";
-    public static final String VERSION = "1.0.0-neoforge";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_NAME);
+    public static final Logger LOGGER = LoggerFactory.getLogger("LootAPI");
+
+    private static LootAPI instance;
 
     public LootAPI(IEventBus modEventBus) {
-        LootLogger.logInit();
+        instance = this;
 
-        // Register GLM serializers
-        GLMRegistry.GLOBAL_LOOT_MODIFIERS.register(modEventBus);
+        LOGGER.info("=================================");
+        LOGGER.info("  LootAPI v2.0 Initializing...  ");
+        LOGGER.info("=================================");
 
-        // Register custom loot conditions
-        GLMRegistry.LOOT_CONDITIONS.register(modEventBus);
-
-        // Setup event
+        // Rejestracja event handlerów
         modEventBus.addListener(this::commonSetup);
 
-        LootLogger.logSuccess("Loot API for NeoForge loading...");
+        // Rejestracja do NeoForge event bus
+        NeoForge.EVENT_BUS.register(this);
+        NeoForge.EVENT_BUS.register(new LootEventHandler());
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
-            try {
-                LootLogger.logInfo("Initializing core components...");
+            LOGGER.info("Loading LootAPI modifications...");
 
-                // Load configuration
-                LootConfigManager.loadAllConfigs();
+            // Załaduj konfigurację
+            LootConfigManager.loadAllConfigs();
 
-                // Finalize all modifications and create JSON files
-                LootTableAPI.finalizeModifications();
+            // Inicjalizuj system modyfikacji
+            LootModificationSystem.initialize();
 
-                LootLogger.logInitComplete();
-                LootLogger.logInfo("NeoForge Global Loot Modifiers: READY");
-                LootLogger.logInfo("All limitations from Fabric version are now REMOVED!");
-
-            } catch (Exception e) {
-                LOGGER.error("Failed to initialize Loot API!", e);
-                throw new RuntimeException("Loot API initialization failed", e);
-            }
+            LOGGER.info("LootAPI ready! Registered {} modifications",
+                    LootModificationSystem.getModificationCount());
         });
+    }
+
+    public static LootAPI getInstance() {
+        return instance;
+    }
+
+    /**
+     * Event handler dla modyfikacji loot tables
+     */
+    public static class LootEventHandler {
+        @SubscribeEvent
+        public void onLootTableLoad(LootTableLoadEvent event) {
+            // Aplikuj modyfikacje do ładowanej tabeli
+            LootModificationSystem.applyModifications(event);
+        }
     }
 }

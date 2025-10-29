@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Professional logging system for Loot API
  */
+
 public class LootLogger {
     private static final Logger LOGGER = LoggerFactory.getLogger("LootAPI");
 
