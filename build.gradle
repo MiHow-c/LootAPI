@@ -9,7 +9,10 @@ version = mod_version
 group = mod_group_id
 
 repositories {
+    mavenCentral()
     mavenLocal()
+    maven { url 'https://maven.neoforged.net/releases' }
+    maven { url 'https://maven.fabricmc.net/' }
     maven { url 'https://jitpack.io' }
 }
 
