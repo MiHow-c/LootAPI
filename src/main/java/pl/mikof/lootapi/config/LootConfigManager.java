@@ -6,9 +6,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.neoforged.fml.loading.FMLPaths;
-import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pl.mikof.lootapi.LootTableAPI;
+import pl.mikof.lootapi.util.ColoredLogger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,31 +18,45 @@ import java.nio.file.Path;
  * Manager konfiguracji - ładuje modyfikacje z plików JSON
  */
 public class LootConfigManager {
-    private static final Logger LOGGER = LoggerFactory.getLogger("LootConfigManager");
+    private static final ColoredLogger LOGGER = new ColoredLogger(LoggerFactory.getLogger("LootConfigManager"));
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static int loadedModifications = 0;
 
     /**
      * Ładuje wszystkie pliki konfiguracyjne
      */
     public static void loadAllConfigs() {
         Path configDir = FMLPaths.CONFIGDIR.get().resolve("lootapi");
+        loadedModifications = 0;
+
+        LOGGER.header("Loading LootAPI configurations...");
 
         try {
             // Stwórz katalog jeśli nie istnieje
             if (!Files.exists(configDir)) {
                 Files.createDirectories(configDir);
                 createExampleConfig(configDir);
-                LOGGER.info("Created config directory: {}", configDir);
+                LOGGER.init("Created config directory: {}", configDir);
             }
 
             // Załaduj wszystkie pliki .json
-            Files.list(configDir)
+            long fileCount = Files.list(configDir)
                     .filter(path -> path.toString().endsWith(".json"))
-                    .forEach(LootConfigManager::loadConfigFile);
+                    .peek(LootConfigManager::loadConfigFile)
+                    .count();
+
+            if (fileCount == 0) {
+                LOGGER.info("No configuration files found in {}", configDir);
+                LOGGER.info("Create .json files to add loot modifications");
+            } else {
+                LOGGER.success("Loaded {} modifications from {} config files", loadedModifications, fileCount);
+            }
 
         } catch (IOException e) {
             LOGGER.error("Failed to load configs", e);
         }
+
+        LOGGER.separator();
     }
 
     /**
@@ -50,51 +64,110 @@ public class LootConfigManager {
      */
     private static void loadConfigFile(Path configFile) {
         try {
-            String json = Files.readString(configFile);
-            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            LOGGER.action("Loading config: {}", configFile.getFileName());
 
-            LOGGER.info("Loading config: {}", configFile.getFileName());
+            // Walidacja pliku
+            if (!Files.exists(configFile)) {
+                LOGGER.error("Config file does not exist: {}", configFile);
+                return;
+            }
+
+            if (!Files.isReadable(configFile)) {
+                LOGGER.error("Config file is not readable: {}", configFile);
+                return;
+            }
+
+            String json = Files.readString(configFile);
+
+            if (json == null || json.trim().isEmpty()) {
+                LOGGER.warn("Config file is empty: {}", configFile.getFileName());
+                return;
+            }
+
+            JsonObject root;
+            try {
+                root = JsonParser.parseString(json).getAsJsonObject();
+            } catch (JsonSyntaxException e) {
+                LOGGER.error("Invalid JSON syntax in {}: {}", configFile.getFileName(), e.getMessage());
+                return;
+            }
+
+            int modificationsInFile = 0;
 
             // Przetwórz modyfikacje
             if (root.has("modifications")) {
-                processModifications(root.getAsJsonArray("modifications"));
+                modificationsInFile += processModifications(root.getAsJsonArray("modifications"));
             }
 
             // Przetwórz usunięcia
             if (root.has("removals")) {
-                processRemovals(root.getAsJsonArray("removals"));
+                modificationsInFile += processRemovals(root.getAsJsonArray("removals"));
             }
 
             // Przetwórz zastąpienia
             if (root.has("replacements")) {
-                processReplacements(root.getAsJsonArray("replacements"));
+                modificationsInFile += processReplacements(root.getAsJsonArray("replacements"));
             }
 
             // Przetwórz mnożniki
             if (root.has("multipliers")) {
-                processMultipliers(root.getAsJsonArray("multipliers"));
+                modificationsInFile += processMultipliers(root.getAsJsonArray("multipliers"));
             }
 
             // Przetwórz wyłączenia
             if (root.has("disabled_tables")) {
-                processDisabledTables(root.getAsJsonArray("disabled_tables"));
+                modificationsInFile += processDisabledTables(root.getAsJsonArray("disabled_tables"));
             }
 
+            if (modificationsInFile > 0) {
+                LOGGER.success("Loaded {} modifications from {}", modificationsInFile, configFile.getFileName());
+            } else {
+                LOGGER.warn("No modifications found in {}", configFile.getFileName());
+            }
+
+        } catch (IOException e) {
+            LOGGER.error("Failed to read config file: {}", configFile.getFileName(), e);
         } catch (Exception e) {
-            LOGGER.error("Failed to load config: {}", configFile, e);
+            LOGGER.error("Unexpected error loading config: {}", configFile.getFileName(), e);
         }
     }
 
     /**
      * Przetwarza modyfikacje (dodawanie przedmiotów)
      */
-    private static void processModifications(JsonArray modifications) {
+    private static int processModifications(JsonArray modifications) {
+        int count = 0;
         for (JsonElement element : modifications) {
             try {
+                if (!element.isJsonObject()) {
+                    LOGGER.warn("Invalid modification entry (not an object), skipping");
+                    continue;
+                }
+
                 JsonObject mod = element.getAsJsonObject();
+
+                // Walidacja wymaganych pól
+                if (!mod.has("table")) {
+                    LOGGER.warn("Modification missing 'table' field, skipping");
+                    continue;
+                }
+                if (!mod.has("item")) {
+                    LOGGER.warn("Modification missing 'item' field, skipping");
+                    continue;
+                }
 
                 String tableId = mod.get("table").getAsString();
                 String itemId = mod.get("item").getAsString();
+
+                // Walidacja ID
+                if (tableId == null || tableId.isEmpty()) {
+                    LOGGER.warn("Invalid table ID (empty), skipping");
+                    continue;
+                }
+                if (itemId == null || itemId.isEmpty()) {
+                    LOGGER.warn("Invalid item ID (empty), skipping");
+                    continue;
+                }
 
                 ResourceLocation table = ResourceLocation.parse(tableId);
                 Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
@@ -106,33 +179,69 @@ public class LootConfigManager {
 
                 // Sprawdź czy ma określoną ilość
                 if (mod.has("count")) {
-                    JsonObject count = mod.getAsJsonObject("count");
-                    int min = count.get("min").getAsInt();
-                    int max = count.get("max").getAsInt();
-                    int weight = mod.has("weight") ? mod.get("weight").getAsInt() : 1;
+                    JsonObject countObj = mod.getAsJsonObject("count");
+                    int min = countObj.has("min") ? countObj.get("min").getAsInt() : 1;
+                    int max = countObj.has("max") ? countObj.get("max").getAsInt() : 1;
+                    float chance = mod.has("chance") ? mod.get("chance").getAsFloat() : 1.0f;
 
-                    LootTableAPI.addItemWithCount(table, item, weight, min, max);
+                    // Walidacja wartości
+                    if (min <= 0 || max <= 0) {
+                        LOGGER.warn("Invalid count values (min: {}, max: {}), skipping", min, max);
+                        continue;
+                    }
+                    if (chance < 0.0f || chance > 1.0f) {
+                        LOGGER.warn("Invalid chance value: {} (must be 0.0-1.0), skipping", chance);
+                        continue;
+                    }
+
+                    LootTableAPI.addItemToTable(table, item, min, max, chance);
                 } else {
-                    int weight = mod.has("weight") ? mod.get("weight").getAsInt() : 1;
-                    LootTableAPI.addItemToTable(table, item, weight);
+                    int singleCount = mod.has("count_single") ? mod.get("count_single").getAsInt() : 1;
+                    if (singleCount <= 0) {
+                        LOGGER.warn("Invalid count value: {}, skipping", singleCount);
+                        continue;
+                    }
+                    LootTableAPI.addItemToTable(table, item, singleCount);
                 }
 
+                count++;
+                loadedModifications++;
+
+            } catch (JsonSyntaxException e) {
+                LOGGER.error("JSON syntax error in modification: {}", e.getMessage());
             } catch (Exception e) {
-                LOGGER.error("Failed to process modification", e);
+                LOGGER.error("Failed to process modification: {}", e.getMessage());
             }
         }
+        return count;
     }
 
     /**
      * Przetwarza usunięcia przedmiotów
      */
-    private static void processRemovals(JsonArray removals) {
+    private static int processRemovals(JsonArray removals) {
+        int count = 0;
         for (JsonElement element : removals) {
             try {
+                if (!element.isJsonObject()) {
+                    LOGGER.warn("Invalid removal entry (not an object), skipping");
+                    continue;
+                }
+
                 JsonObject removal = element.getAsJsonObject();
+
+                if (!removal.has("table") || !removal.has("item")) {
+                    LOGGER.warn("Removal missing required fields, skipping");
+                    continue;
+                }
 
                 String tableId = removal.get("table").getAsString();
                 String itemId = removal.get("item").getAsString();
+
+                if (tableId == null || tableId.isEmpty() || itemId == null || itemId.isEmpty()) {
+                    LOGGER.warn("Invalid table or item ID (empty), skipping");
+                    continue;
+                }
 
                 ResourceLocation table = ResourceLocation.parse(tableId);
                 Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
@@ -143,76 +252,147 @@ public class LootConfigManager {
                 }
 
                 LootTableAPI.removeItemFromTable(table, item);
+                count++;
+                loadedModifications++;
 
             } catch (Exception e) {
-                LOGGER.error("Failed to process removal", e);
+                LOGGER.error("Failed to process removal: {}", e.getMessage());
             }
         }
+        return count;
     }
 
     /**
      * Przetwarza zastąpienia przedmiotów
      */
-    private static void processReplacements(JsonArray replacements) {
+    private static int processReplacements(JsonArray replacements) {
+        int count = 0;
         for (JsonElement element : replacements) {
             try {
+                if (!element.isJsonObject()) {
+                    LOGGER.warn("Invalid replacement entry (not an object), skipping");
+                    continue;
+                }
+
                 JsonObject replacement = element.getAsJsonObject();
+
+                if (!replacement.has("table") || !replacement.has("old_item") || !replacement.has("new_item")) {
+                    LOGGER.warn("Replacement missing required fields, skipping");
+                    continue;
+                }
 
                 String tableId = replacement.get("table").getAsString();
                 String oldItemId = replacement.get("old_item").getAsString();
                 String newItemId = replacement.get("new_item").getAsString();
 
+                if (tableId == null || tableId.isEmpty() ||
+                    oldItemId == null || oldItemId.isEmpty() ||
+                    newItemId == null || newItemId.isEmpty()) {
+                    LOGGER.warn("Invalid IDs in replacement (empty), skipping");
+                    continue;
+                }
+
                 ResourceLocation table = ResourceLocation.parse(tableId);
                 Item oldItem = BuiltInRegistries.ITEM.get(ResourceLocation.parse(oldItemId));
                 Item newItem = BuiltInRegistries.ITEM.get(ResourceLocation.parse(newItemId));
 
-                if (oldItem == Items.AIR || newItem == Items.AIR) {
-                    LOGGER.warn("Unknown item in replacement");
+                if (oldItem == Items.AIR) {
+                    LOGGER.warn("Unknown old item: {}", oldItemId);
+                    continue;
+                }
+                if (newItem == Items.AIR) {
+                    LOGGER.warn("Unknown new item: {}", newItemId);
                     continue;
                 }
 
                 LootTableAPI.replaceItem(table, oldItem, newItem);
+                count++;
+                loadedModifications++;
 
             } catch (Exception e) {
-                LOGGER.error("Failed to process replacement", e);
+                LOGGER.error("Failed to process replacement: {}", e.getMessage());
             }
         }
+        return count;
     }
 
     /**
      * Przetwarza mnożniki dropów
      */
-    private static void processMultipliers(JsonArray multipliers) {
+    private static int processMultipliers(JsonArray multipliers) {
+        int count = 0;
         for (JsonElement element : multipliers) {
             try {
+                if (!element.isJsonObject()) {
+                    LOGGER.warn("Invalid multiplier entry (not an object), skipping");
+                    continue;
+                }
+
                 JsonObject mult = element.getAsJsonObject();
+
+                if (!mult.has("table") || !mult.has("multiplier")) {
+                    LOGGER.warn("Multiplier missing required fields, skipping");
+                    continue;
+                }
 
                 String tableId = mult.get("table").getAsString();
                 float multiplier = mult.get("multiplier").getAsFloat();
 
+                if (tableId == null || tableId.isEmpty()) {
+                    LOGGER.warn("Invalid table ID (empty), skipping");
+                    continue;
+                }
+
+                if (multiplier <= 0.0f) {
+                    LOGGER.warn("Invalid multiplier value: {} (must be positive), skipping", multiplier);
+                    continue;
+                }
+
+                if (multiplier > 100.0f) {
+                    LOGGER.warn("Extremely high multiplier: {}x - are you sure?", multiplier);
+                }
+
                 ResourceLocation table = ResourceLocation.parse(tableId);
                 LootTableAPI.multiplyDrops(table, multiplier);
+                count++;
+                loadedModifications++;
 
             } catch (Exception e) {
-                LOGGER.error("Failed to process multiplier", e);
+                LOGGER.error("Failed to process multiplier: {}", e.getMessage());
             }
         }
+        return count;
     }
 
     /**
      * Przetwarza wyłączone tabele
      */
-    private static void processDisabledTables(JsonArray disabledTables) {
+    private static int processDisabledTables(JsonArray disabledTables) {
+        int count = 0;
         for (JsonElement element : disabledTables) {
             try {
+                if (!element.isJsonPrimitive()) {
+                    LOGGER.warn("Invalid disabled table entry (not a string), skipping");
+                    continue;
+                }
+
                 String tableId = element.getAsString();
+
+                if (tableId == null || tableId.isEmpty()) {
+                    LOGGER.warn("Invalid table ID (empty), skipping");
+                    continue;
+                }
+
                 ResourceLocation table = ResourceLocation.parse(tableId);
                 LootTableAPI.disableLootTable(table);
+                count++;
+                loadedModifications++;
 
             } catch (Exception e) {
-                LOGGER.error("Failed to process disabled table", e);
+                LOGGER.error("Failed to process disabled table: {}", e.getMessage());
             }
         }
+        return count;
     }
 
     /**
@@ -288,8 +468,8 @@ public class LootConfigManager {
             Path exampleFile = configDir.resolve("example.json.disabled");
             Files.writeString(exampleFile, GSON.toJson(example));
 
-            LOGGER.info("Created example config: {}", exampleFile);
-            LOGGER.info("Rename to .json to enable");
+            LOGGER.success("Created example config: {}", exampleFile.getFileName());
+            LOGGER.info("Rename to .json to enable the example configuration");
 
         } catch (IOException e) {
             LOGGER.error("Failed to create example config", e);

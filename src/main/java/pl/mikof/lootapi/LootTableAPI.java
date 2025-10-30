@@ -5,16 +5,19 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import pl.mikof.lootapi.system.LootModificationSystem;
-import pl.mikof.lootapi.system.LootModificationSystem.LootModification;
+import pl.mikof.lootapi.api.LootModifierBuilder;
+import pl.mikof.lootapi.api.LootModifierRegistry;
+import pl.mikof.lootapi.util.ColoredLogger;
 
 /**
  * Publiczne API do modyfikacji loot tables
- * Prosty interfejs dla innych modów
+ * Prosty interfejs dla innych modów - wersja 3.0 z Global Loot Modifiers
  */
 public class LootTableAPI {
-    private static final Logger LOGGER = LoggerFactory.getLogger("LootTableAPI");
+    private static final ColoredLogger LOGGER = new ColoredLogger(LoggerFactory.getLogger("LootTableAPI"));
     private static boolean initialized = false;
+    private static boolean finalized = false;
+    private static int modifierCounter = 0;
 
     /**
      * Inicjalizuje API (wywoływane automatycznie)
@@ -22,7 +25,8 @@ public class LootTableAPI {
     public static void init() {
         if (!initialized) {
             initialized = true;
-            LOGGER.info("LootTableAPI initialized");
+            LootModifierRegistry.init();
+            LOGGER.success("LootTableAPI v3.0 initialized with Global Loot Modifiers");
         }
     }
 
@@ -32,33 +36,57 @@ public class LootTableAPI {
      * Dodaje przedmiot do loot table
      * @param tableId ID tabeli (np. "minecraft:blocks/diamond_ore")
      * @param item Przedmiot do dodania
-     * @param weight Waga (1-100, wyższa = częściej wypada)
      */
-    public static void addItemToTable(ResourceLocation tableId, Item item, int weight) {
-        validateInputs(tableId, item, "addItemToTable");
-
-        LootModificationSystem.addModification(tableId,
-                LootModification.addItem(item, weight));
-
-        LOGGER.info("Added {} to {} with weight {}", item, tableId, weight);
+    public static void addItemToTable(ResourceLocation tableId, Item item) {
+        addItemToTable(tableId, item, 1, 1, 1.0f);
     }
 
     /**
-     * Dodaje przedmiot z określoną ilością
+     * Dodaje przedmiot do loot table z określoną ilością
      * @param tableId ID tabeli
      * @param item Przedmiot
-     * @param weight Waga
+     * @param count Ilość
+     */
+    public static void addItemToTable(ResourceLocation tableId, Item item, int count) {
+        addItemToTable(tableId, item, count, count, 1.0f);
+    }
+
+    /**
+     * Dodaje przedmiot do loot table z zakresem ilości
+     * @param tableId ID tabeli
+     * @param item Przedmiot
      * @param minCount Minimalna ilość
      * @param maxCount Maksymalna ilość
      */
-    public static void addItemWithCount(ResourceLocation tableId, Item item, int weight, int minCount, int maxCount) {
-        validateInputs(tableId, item, "addItemWithCount");
+    public static void addItemToTable(ResourceLocation tableId, Item item, int minCount, int maxCount) {
+        addItemToTable(tableId, item, minCount, maxCount, 1.0f);
+    }
+
+    /**
+     * Dodaje przedmiot do loot table z zakresem ilości i szansą
+     * @param tableId ID tabeli
+     * @param item Przedmiot
+     * @param minCount Minimalna ilość
+     * @param maxCount Maksymalna ilość
+     * @param chance Szansa (0.0 - 1.0)
+     */
+    public static void addItemToTable(ResourceLocation tableId, Item item, int minCount, int maxCount, float chance) {
+        validateInputs(tableId, item, "addItemToTable");
         validateCounts(minCount, maxCount);
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.addItemWithCount(item, minCount, maxCount));
+        String modifierId = generateModifierId("add_item");
 
-        LOGGER.info("Added {} to {} with count {}-{}", item, tableId, minCount, maxCount);
+        LootModifierBuilder builder = LootModifierBuilder.addItem(modifierId)
+                .forTable(tableId)
+                .withItem(item)
+                .withCount(minCount, maxCount);
+
+        if (chance < 1.0f) {
+            builder.withChance(chance);
+        }
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Added {} to {} (count: {}-{}, chance: {})", item, tableId, minCount, maxCount, chance);
     }
 
     /**
@@ -69,10 +97,14 @@ public class LootTableAPI {
     public static void removeItemFromTable(ResourceLocation tableId, Item item) {
         validateInputs(tableId, item, "removeItemFromTable");
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.removeItem(item));
+        String modifierId = generateModifierId("remove_item");
 
-        LOGGER.info("Removed {} from {}", item, tableId);
+        LootModifierBuilder builder = LootModifierBuilder.removeItem(modifierId)
+                .forTable(tableId)
+                .withItem(item);
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Removed {} from {}", item, tableId);
     }
 
     /**
@@ -85,10 +117,15 @@ public class LootTableAPI {
         validateInputs(tableId, oldItem, "replaceItem");
         validateInputs(tableId, newItem, "replaceItem");
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.replaceItem(oldItem, newItem));
+        String modifierId = generateModifierId("replace_item");
 
-        LOGGER.info("Replaced {} with {} in {}", oldItem, newItem, tableId);
+        LootModifierBuilder builder = LootModifierBuilder.replaceItem(modifierId)
+                .forTable(tableId)
+                .withOldItem(oldItem)
+                .withNewItem(newItem);
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Replaced {} with {} in {}", oldItem, newItem, tableId);
     }
 
     /**
@@ -97,17 +134,30 @@ public class LootTableAPI {
      * @param multiplier Mnożnik (np. 2.0 = podwójne dropy)
      */
     public static void multiplyDrops(ResourceLocation tableId, float multiplier) {
+        checkInitialized();
+        checkNotFinalized();
+
         if (tableId == null) {
-            throw new IllegalArgumentException("Table ID cannot be null");
+            throw new IllegalArgumentException(
+                    "Table ID cannot be null!\n" +
+                    "Example: LootTables.Blocks.IRON_ORE"
+            );
         }
         if (multiplier <= 0) {
-            throw new IllegalArgumentException("Multiplier must be positive");
+            throw new IllegalArgumentException(
+                    "Multiplier must be positive! Got: " + multiplier + "\n" +
+                    "Example: multiplyDrops(table, 2.0f) for double drops"
+            );
         }
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.multiplyDrops(multiplier));
+        String modifierId = generateModifierId("multiply_drops");
 
-        LOGGER.info("Set multiplier {}x for {}", multiplier, tableId);
+        LootModifierBuilder builder = LootModifierBuilder.multiplyDrops(modifierId)
+                .forTable(tableId)
+                .withMultiplier(multiplier);
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Set multiplier {}x for {}", multiplier, tableId);
     }
 
     /**
@@ -115,14 +165,23 @@ public class LootTableAPI {
      * @param tableId ID tabeli
      */
     public static void disableLootTable(ResourceLocation tableId) {
+        checkInitialized();
+        checkNotFinalized();
+
         if (tableId == null) {
-            throw new IllegalArgumentException("Table ID cannot be null");
+            throw new IllegalArgumentException(
+                    "Table ID cannot be null!\n" +
+                    "Example: LootTables.Blocks.STONE or LootTables.Entities.ZOMBIE"
+            );
         }
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.clearTable());
+        String modifierId = generateModifierId("clear_table");
 
-        LOGGER.info("Disabled loot table {}", tableId);
+        LootModifierBuilder builder = LootModifierBuilder.clearTable(modifierId)
+                .forTable(tableId);
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Disabled loot table {}", tableId);
     }
 
     /**
@@ -136,10 +195,15 @@ public class LootTableAPI {
         validateInputs(tableId, item, "setOnlyDrop");
         validateCounts(minCount, maxCount);
 
-        LootModificationSystem.addModification(tableId,
-                LootModification.setOnlyDrop(item, minCount, maxCount));
+        String modifierId = generateModifierId("set_only_drop");
 
-        LOGGER.info("Set {} as only drop in {} (count: {}-{})", item, tableId, minCount, maxCount);
+        LootModifierBuilder builder = LootModifierBuilder.setOnlyDrop(modifierId)
+                .forTable(tableId)
+                .withItem(item)
+                .withCount(minCount, maxCount);
+
+        LootModifierRegistry.register(builder);
+        LOGGER.action("Set {} as only drop in {} (count: {}-{})", item, tableId, minCount, maxCount);
     }
 
     /**
@@ -149,13 +213,148 @@ public class LootTableAPI {
         setOnlyDrop(tableId, item, 1, 1);
     }
 
+    // ==================== ALIASY (łatwiejsze nazwy) ====================
+
+    /**
+     * Usuwa wszystkie dropy z tabeli (alias dla disableLootTable)
+     * @param tableId ID tabeli
+     */
+    public static void removeAllDrops(ResourceLocation tableId) {
+        disableLootTable(tableId);
+    }
+
+    /**
+     * Dodaje przedmiot z określoną szansą (1 sztuka)
+     * @param tableId ID tabeli
+     * @param item Przedmiot
+     * @param chance Szansa (0.0 - 1.0)
+     */
+    public static void addItemWithChance(ResourceLocation tableId, Item item, float chance) {
+        addItemToTable(tableId, item, 1, 1, chance);
+    }
+
+    // ==================== BULK OPERATIONS (wiele tabel naraz) ====================
+
+    /**
+     * Dodaje przedmiot do wielu tabel jednocześnie
+     * @param item Przedmiot do dodania
+     * @param tables Tabele docelowe
+     */
+    public static void addItemToTables(Item item, ResourceLocation... tables) {
+        addItemToTables(item, 1, 1, 1.0f, tables);
+    }
+
+    /**
+     * Dodaje przedmiot do wielu tabel z określoną ilością i szansą
+     */
+    public static void addItemToTables(Item item, int minCount, int maxCount, float chance, ResourceLocation... tables) {
+        if (tables == null || tables.length == 0) {
+            throw new IllegalArgumentException("Must provide at least one table");
+        }
+        for (ResourceLocation table : tables) {
+            addItemToTable(table, item, minCount, maxCount, chance);
+        }
+        LOGGER.success("Added {} to {} tables", item, tables.length);
+    }
+
+    /**
+     * Mnoży dropy dla wielu tabel jednocześnie
+     * @param multiplier Mnożnik
+     * @param tables Tabele docelowe
+     */
+    public static void multiplyDropsForTables(float multiplier, ResourceLocation... tables) {
+        if (tables == null || tables.length == 0) {
+            throw new IllegalArgumentException("Must provide at least one table");
+        }
+        for (ResourceLocation table : tables) {
+            multiplyDrops(table, multiplier);
+        }
+        LOGGER.success("Set {}x multiplier for {} tables", multiplier, tables.length);
+    }
+
+    /**
+     * Usuwa wszystkie dropy z wielu tabel jednocześnie
+     * @param tables Tabele docelowe
+     */
+    public static void removeAllDropsFrom(ResourceLocation... tables) {
+        if (tables == null || tables.length == 0) {
+            throw new IllegalArgumentException("Must provide at least one table");
+        }
+        for (ResourceLocation table : tables) {
+            disableLootTable(table);
+        }
+        LOGGER.success("Disabled {} loot tables", tables.length);
+    }
+
+    /**
+     * Usuwa określony przedmiot z wielu tabel jednocześnie
+     * @param item Przedmiot do usunięcia
+     * @param tables Tabele docelowe
+     */
+    public static void removeItemFromTables(Item item, ResourceLocation... tables) {
+        if (tables == null || tables.length == 0) {
+            throw new IllegalArgumentException("Must provide at least one table");
+        }
+        for (ResourceLocation table : tables) {
+            removeItemFromTable(table, item);
+        }
+        LOGGER.success("Removed {} from {} tables", item, tables.length);
+    }
+
+    // ==================== ZAAWANSOWANE METODY ====================
+
+    /**
+     * Tworzy niestandardowy modifier builder
+     */
+    public static LootModifierBuilder createCustomModifier(String type, String modifierId) {
+        // Metoda pozwalająca na tworzenie bardziej złożonych modifierów
+        return switch (type.toLowerCase()) {
+            case "add" -> LootModifierBuilder.addItem(modifierId);
+            case "remove" -> LootModifierBuilder.removeItem(modifierId);
+            case "replace" -> LootModifierBuilder.replaceItem(modifierId);
+            case "multiply" -> LootModifierBuilder.multiplyDrops(modifierId);
+            case "clear" -> LootModifierBuilder.clearTable(modifierId);
+            case "setonly" -> LootModifierBuilder.setOnlyDrop(modifierId);
+            default -> throw new IllegalArgumentException("Unknown modifier type: " + type);
+        };
+    }
+
+    /**
+     * Rejestruje niestandardowy modifier
+     */
+    public static void registerModifier(LootModifierBuilder builder) {
+        LootModifierRegistry.register(builder);
+    }
+
     // ==================== METODY POMOCNICZE ====================
+
+    /**
+     * Finalizuje wszystkie modifiery i zapisuje do plików
+     * Wywoływane automatycznie podczas startu gry
+     */
+    public static void finalizeModifiers() {
+        if (finalized) {
+            LOGGER.warn("finalizeModifiers() already called! Ignoring duplicate call.");
+            return;
+        }
+        if (!initialized) {
+            throw new IllegalStateException(
+                    "LootTableAPI not initialized! Call LootTableAPI.init() first.\n" +
+                    "Make sure you call init() in your mod's commonSetup event."
+            );
+        }
+
+        LootModifierRegistry.writeToFiles();
+        finalized = true;
+        LOGGER.success("Finalized {} loot modifiers - ready to use!", LootModifierRegistry.getModifierCount());
+    }
 
     /**
      * Czyści wszystkie modyfikacje
      */
     public static void clearAllModifications() {
-        LootModificationSystem.clearModifications();
+        LootModifierRegistry.clear();
+        modifierCounter = 0;
         LOGGER.info("Cleared all loot modifications");
     }
 
@@ -163,29 +362,96 @@ public class LootTableAPI {
      * Zwraca liczbę aktywnych modyfikacji
      */
     public static int getModificationCount() {
-        return LootModificationSystem.getModificationCount();
+        return LootModifierRegistry.getModifierCount();
+    }
+
+    /**
+     * Debug - wypisuje informacje o modifierach
+     */
+    public static void printDebugInfo() {
+        LootModifierRegistry.printDebugInfo();
     }
 
     // ==================== WALIDACJA ====================
 
+    /**
+     * Sprawdza czy API zostało zainicjalizowane
+     */
+    private static void checkInitialized() {
+        if (!initialized) {
+            throw new IllegalStateException(
+                    "\n" +
+                    "========================================\n" +
+                    " LootTableAPI ERROR: Not Initialized!\n" +
+                    "========================================\n" +
+                    "You must call LootTableAPI.init() first!\n\n" +
+                    "Add this to your mod's commonSetup event:\n" +
+                    "  event.enqueueWork(() -> {\n" +
+                    "      LootTableAPI.init();\n" +
+                    "      // your modifications here\n" +
+                    "      LootTableAPI.finalizeModifiers();\n" +
+                    "  });\n" +
+                    "========================================\n"
+            );
+        }
+    }
+
+    /**
+     * Sprawdza czy modyfikacje nie zostały już sfinalizowane
+     */
+    private static void checkNotFinalized() {
+        if (finalized) {
+            throw new IllegalStateException(
+                    "\n" +
+                    "========================================\n" +
+                    " LootTableAPI ERROR: Already Finalized!\n" +
+                    "========================================\n" +
+                    "You cannot add modifications after calling\n" +
+                    "finalizeModifiers()!\n\n" +
+                    "Make sure all your modifications are done\n" +
+                    "BEFORE calling finalizeModifiers().\n" +
+                    "========================================\n"
+            );
+        }
+    }
+
     private static void validateInputs(ResourceLocation tableId, Item item, String operation) {
+        checkInitialized();
+        checkNotFinalized();
+
         if (tableId == null) {
-            throw new IllegalArgumentException(operation + ": Table ID cannot be null");
+            throw new IllegalArgumentException(
+                    operation + ": Table ID cannot be null!\n" +
+                    "Example: LootTables.Blocks.DIAMOND_ORE or ResourceLocation.fromNamespaceAndPath(\"minecraft\", \"blocks/diamond_ore\")"
+            );
         }
         if (item == null || item == Items.AIR) {
-            throw new IllegalArgumentException(operation + ": Item cannot be null or AIR");
+            throw new IllegalArgumentException(
+                    operation + ": Item cannot be null or AIR!\n" +
+                    "Example: Items.DIAMOND, Items.EMERALD, etc."
+            );
         }
     }
 
     private static void validateCounts(int minCount, int maxCount) {
         if (minCount <= 0) {
-            throw new IllegalArgumentException("Min count must be positive");
+            throw new IllegalArgumentException(
+                    "Min count must be positive! Got: " + minCount + "\n" +
+                    "Example: addItemToTable(table, item, 1, 5) for 1-5 items"
+            );
         }
         if (maxCount < minCount) {
-            throw new IllegalArgumentException("Max count must be >= min count");
+            throw new IllegalArgumentException(
+                    "Max count (" + maxCount + ") must be >= min count (" + minCount + ")!\n" +
+                    "Example: addItemToTable(table, item, 1, 5) NOT addItemToTable(table, item, 5, 1)"
+            );
         }
         if (maxCount > 64) {
-            LOGGER.warn("Max count {} exceeds stack size", maxCount);
+            LOGGER.warn("Max count {} exceeds stack size (64) - this may cause issues!", maxCount);
         }
+    }
+
+    private static String generateModifierId(String prefix) {
+        return prefix + "_" + (modifierCounter++);
     }
 }
